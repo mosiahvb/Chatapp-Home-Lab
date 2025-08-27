@@ -1,4 +1,4 @@
-#!/Users/audravaldez/Desktop/Mosiah-cyber-programing/blackbear/venv/bin/python3.12
+#!/Users/audravaldez/Desktop/Mosiah-cyber-programing/blackbear/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
