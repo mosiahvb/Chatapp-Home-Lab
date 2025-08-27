@@ -3,6 +3,17 @@
 <div class="container">
     <h1>Welcome to Blackbear Chat</h1>
     <p>A deliberately vulnerable chat application for learning cybersecurity</p>
-    <a href="/chat" class="btn">Enter Chat</a>
+    
+    <div class="nav-buttons">
+        <a href="/login" class="btn">Login</a>
+        <a href="/register" class="btn">Register</a>
+        <a href="/chat" class="btn">Chat (Requires Login)</a>
+    </div>
+    
+    <div class="warning">
+        <h3>⚠️ Security Notice ⚠️</h3>
+        <p>This application contains intentional security vulnerabilities for educational purposes.<br>
+        Do not use in production or with real sensitive data.</p>
+    </div>
 </div>
 {% endblock %}
