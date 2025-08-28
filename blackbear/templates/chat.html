@@ -1,10 +1,50 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="chat-container">
-    <div id="messages"></div>
-    <div class="input-area">
-        <input type="text" id="messageInput" placeholder="Type your message...">
-        <button onclick="sendMessage()">Send</button>
+<div class="chat-app">
+    <!-- User List Sidebar -->
+    <div class="users-sidebar">
+        <div class="current-user">
+            <h3>Logged in as:</h3>
+            <div class="user-info">
+                <span class="status-dot online"></span>
+                <span>{{ session.display_name }}</span>
+            </div>
+        </div>
+        
+        <div class="users-list">
+            <h3>Users</h3>
+            <div id="usersList">
+                {% for user in users %}
+                <div class="user-item" data-user-id="{{ user.id }}" onclick="selectUser({{ user.id }}, '{{ user.display_name }}')">
+                    <span class="status-dot {{ 'online' if user.is_online else 'offline' }}"></span>
+                    <span class="user-name">{{ user.display_name }}</span>
+                    <span class="username">@{{ user.username }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="user-actions">
+            <a href="{{ url_for('logout') }}" class="btn btn-logout">Logout</a>
+        </div>
+    </div>
+    
+    <!-- Chat Area -->
+    <div class="chat-main">
+        <div class="chat-header">
+            <div id="chatTitle">Select a user to start chatting</div>
+            <div id="typingIndicator" class="typing-indicator" style="display: none;">
+                <span id="typingUser"></span> is typing...
+            </div>
+        </div>
+        
+        <div id="messages" class="messages-container"></div>
+        
+        <div class="message-input-area" id="messageInputArea" style="display: none;">
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -12,7 +52,11 @@
 {% block scripts %}
 <script>
     const socket = io();
+    let currentReceiverId = null;
+    let currentReceiverName = null;
+    let typingTimeout = null;
     
+    // Socket event handlers
     socket.on('connect', function() {
         console.log('Connected to server');
     });
@@ -21,20 +65,183 @@
         console.log('Status:', data.msg);
     });
     
+    socket.on('message_received', function(data) {
+        displayMessage(data);
+    });
+    
+    socket.on('user_status_update', function(data) {
+        updateUserStatus(data.user_id, data.status);
+    });
+    
+    socket.on('user_typing', function(data) {
+        if (data.sender_id === currentReceiverId) {
+            showTypingIndicator(data.sender_name, data.is_typing);
+        }
+    });
+    
+    socket.on('error', function(data) {
+        alert('Error: ' + data.msg);
+    });
+    
+    // UI Functions
+    function selectUser(userId, displayName) {
+        currentReceiverId = userId;
+        currentReceiverName = displayName;
+        
+        // Update UI
+        document.getElementById('chatTitle').textContent = `Chat with ${displayName}`;
+        document.getElementById('messageInputArea').style.display = 'flex';
+        document.getElementById('messageInput').disabled = false;
+        document.getElementById('sendButton').disabled = false;
+        
+        // Clear current messages
+        document.getElementById('messages').innerHTML = '';
+        
+        // Load message history
+        loadMessageHistory(userId);
+        
+        // Highlight selected user
+        document.querySelectorAll('.user-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        document.querySelector(`[data-user-id="${userId}"]`).classList.add('selected');
+        
+        // Focus on input
+        document.getElementById('messageInput').focus();
+    }
+    
+    function loadMessageHistory(userId) {
+        fetch(`/api/messages/${userId}`)
+            .then(response => response.json())
+            .then(messages => {
+                messages.forEach(message => {
+                    displayMessage(message);
+                });
+                scrollToBottom();
+            })
+            .catch(error => console.error('Error loading messages:', error));
+    }
+    
+    function displayMessage(message) {
+        const messagesDiv = document.getElementById('messages');
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message';
+        
+        // Check if this is our message or theirs
+        const isOwnMessage = message.sender_id === {{ session.user_id }};
+        messageEl.classList.add(isOwnMessage ? 'own-message' : 'other-message');
+        
+        messageEl.innerHTML = `
+            <div class="message-header">
+                <span class="sender-name">${message.sender_name}</span>
+                <span class="message-time">${formatTime(message.sent_at)}</span>
+            </div>
+            <div class="message-content">${escapeHtml(message.content)}</div>
+        `;
+        
+        messagesDiv.appendChild(messageEl);
+        scrollToBottom();
+    }
+    
     function sendMessage() {
         const input = document.getElementById('messageInput');
-        const message = input.value;
-        if (message.trim()) {
-            socket.emit('message', {data: message});
+        const message = input.value.trim();
+        
+        if (message && currentReceiverId) {
+            socket.emit('send_message', {
+                receiver_id: currentReceiverId,
+                message: message
+            });
             input.value = '';
+            
+            // Stop typing indicator when message is sent
+            if (typingTimeout) {
+                clearTimeout(typingTimeout);
+                socket.emit('typing', {
+                    receiver_id: currentReceiverId,
+                    is_typing: false
+                });
+            }
         }
     }
     
-    // Send message on Enter key
-    document.getElementById('messageInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            sendMessage();
+    function updateUserStatus(userId, status) {
+        const userItem = document.querySelector(`[data-user-id="${userId}"]`);
+        if (userItem) {
+            const statusDot = userItem.querySelector('.status-dot');
+            statusDot.className = `status-dot ${status}`;
         }
+    }
+    
+    function showTypingIndicator(userName, isTyping) {
+        const indicator = document.getElementById('typingIndicator');
+        const userSpan = document.getElementById('typingUser');
+        
+        if (isTyping) {
+            userSpan.textContent = userName;
+            indicator.style.display = 'block';
+        } else {
+            indicator.style.display = 'none';
+        }
+    }
+    
+    function scrollToBottom() {
+        const messagesDiv = document.getElementById('messages');
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    
+    function formatTime(timestamp) {
+        if (timestamp === 'now') {
+            return new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+        return new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Handle Enter key and typing indicators
+    document.addEventListener('DOMContentLoaded', function() {
+        const messageInput = document.getElementById('messageInput');
+        
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Handle typing indicators
+        messageInput.addEventListener('input', function() {
+            if (currentReceiverId) {
+                socket.emit('typing', {
+                    receiver_id: currentReceiverId,
+                    is_typing: true
+                });
+                
+                // Stop typing after 2 seconds of inactivity
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => {
+                    socket.emit('typing', {
+                        receiver_id: currentReceiverId,
+                        is_typing: false
+                    });
+                }, 2000);
+            }
+        });
+        
+        // Handle losing focus (stop typing indicator)
+        messageInput.addEventListener('blur', function() {
+            if (currentReceiverId && typingTimeout) {
+                clearTimeout(typingTimeout);
+                socket.emit('typing', {
+                    receiver_id: currentReceiverId,
+                    is_typing: false
+                });
+            }
+        });
     });
 </script>
 {% endblock %}

@@ -61,6 +61,7 @@ def create_user(username, email, password, display_name):
     try:
         # VULNERABILITY: SQL injection possible, plain text password
         query = f"INSERT INTO users (username, email, password, display_name) VALUES ('{username}', '{email}', '{password}', '{display_name}')"
+        print(f"[DEBUG] Creating user with query: {query}")  # DEBUG LINE
         conn.execute(query)
         conn.commit()
         return True
@@ -75,10 +76,16 @@ def authenticate_user(username, password):
     conn = get_db()
     # VULNERABILITY: SQL injection in authentication
     query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    print(f"[DEBUG] Authentication query: {query}")  # DEBUG LINE
     try:
         user = conn.execute(query).fetchone()
         conn.close()
-        return dict(user) if user else None
+        if user:
+            print(f"[DEBUG] User found: {dict(user)}")  # DEBUG LINE
+            return dict(user)
+        else:
+            print("[DEBUG] No user found")  # DEBUG LINE
+            return None
     except sqlite3.Error as e:
         print(f"Authentication error: {e}")
         conn.close()
@@ -91,7 +98,70 @@ def get_user_by_id(user_id):
     conn.close()
     return dict(user) if user else None
 
+# Helper function to create a test user for SQL injection practice
+def create_test_user():
+    """Create a test user for practicing attacks"""
+    create_user("admin", "admin@test.com", "secret123", "Administrator")
+    create_user("testuser", "test@test.com", "password", "Test User")
+    print("Test users created!")
+
+# Add these functions to your models.py
+
+def save_message(sender_id, receiver_id, content, group_id=None):
+    """Save a message to the database"""
+    conn = get_db()
+    try:
+        conn.execute('''
+            INSERT INTO messages (sender_id, receiver_id, group_id, content)
+            VALUES (?, ?, ?, ?)
+        ''', (sender_id, receiver_id, group_id, content))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"Error saving message: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_messages_between_users(user1_id, user2_id, limit=50):
+    """Get messages between two users"""
+    conn = get_db()
+    messages = conn.execute('''
+        SELECT m.*, u.display_name as sender_name
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE (m.sender_id = ? AND m.receiver_id = ?) 
+           OR (m.sender_id = ? AND m.receiver_id = ?)
+        ORDER BY m.sent_at ASC
+        LIMIT ?
+    ''', (user1_id, user2_id, user2_id, user1_id, limit)).fetchall()
+    conn.close()
+    return [dict(msg) for msg in messages]
+
+def get_all_users_except(user_id):
+    """Get all users except the current one"""
+    conn = get_db()
+    users = conn.execute('''
+        SELECT id, username, display_name, is_online
+        FROM users 
+        WHERE id != ?
+        ORDER BY display_name
+    ''', (user_id,)).fetchall()
+    conn.close()
+    return [dict(user) for user in users]
+
+def update_user_online_status(user_id, is_online):
+    """Update user's online status"""
+    conn = get_db()
+    try:
+        conn.execute('UPDATE users SET is_online = ? WHERE id = ?', (is_online, user_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Error updating online status: {e}")
+    finally:
+        conn.close()
+
+
 if __name__ == '__main__':
     init_db()
-
-    
+    create_test_user()
